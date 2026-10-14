@@ -37,31 +37,31 @@ class TraktService:
         """GET /users/me - validate token and get username."""
         return await self.client.get("/users/me", headers=self._headers(access_token))
 
-    async def exchange_code(self, code: str, redirect_uri: str) -> dict[str, Any]:
+    async def exchange_code(self, code: str, redirect_uri: str, code_verifier: str | None = None) -> dict[str, Any]:
         """Exchange authorization code for tokens."""
-        return await self.client.post(
-            "/oauth/token",
-            json={
-                "code": code,
-                "client_id": settings.TRAKT_CLIENT_ID,
-                "client_secret": settings.TRAKT_CLIENT_SECRET,
-                "redirect_uri": redirect_uri,
-                "grant_type": "authorization_code",
-            },
-        )
+        body: dict[str, Any] = {
+            "code": code,
+            "client_id": settings.TRAKT_CLIENT_ID,
+            "redirect_uri": redirect_uri,
+            "grant_type": "authorization_code",
+        }
+        if settings.TRAKT_CLIENT_SECRET:
+            body["client_secret"] = settings.TRAKT_CLIENT_SECRET
+        if code_verifier:
+            body["code_verifier"] = code_verifier
+        return await self.client.post("/oauth/token", json=body)
 
     async def refresh_token(self, refresh_token: str, redirect_uri: str) -> dict[str, Any]:
         """Refresh expired Trakt access token."""
-        return await self.client.post(
-            "/oauth/token",
-            json={
-                "refresh_token": refresh_token,
-                "client_id": settings.TRAKT_CLIENT_ID,
-                "client_secret": settings.TRAKT_CLIENT_SECRET,
-                "redirect_uri": redirect_uri,
-                "grant_type": "refresh_token",
-            },
-        )
+        body: dict[str, Any] = {
+            "refresh_token": refresh_token,
+            "client_id": settings.TRAKT_CLIENT_ID,
+            "redirect_uri": redirect_uri,
+            "grant_type": "refresh_token",
+        }
+        if settings.TRAKT_CLIENT_SECRET:
+            body["client_secret"] = settings.TRAKT_CLIENT_SECRET
+        return await self.client.post("/oauth/token", json=body)
 
     async def _get_all_pages(self, url: str, headers: dict[str, str]) -> list[dict[str, Any]]:
         """Fetch every page of a Trakt list endpoint.

@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import secrets
 import time
 from urllib.parse import urlencode
@@ -35,9 +37,14 @@ def _verify_state(request: Request, provider: str, state: str | None) -> None:
         raise HTTPException(status_code=400, detail="Invalid or missing OAuth state. Please try connecting again.")
 
 
+def _pkce_challenge(verifier: str) -> str:
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+
 # ── Trakt OAuth ──────────────────────────────────────────────────────────────
 
-TRAKT_AUTH_URL = "https://trakt.tv/oauth/authorize"
+TRAKT_AUTH_URL = "https://auth.trakt.tv/oauth/authorize"
 
 
 @router.get("/auth/trakt")
@@ -48,31 +55,39 @@ async def trakt_auth_redirect(request: Request):
 
     redirect_uri = f"{settings.HOST_NAME}/auth/trakt/callback"
     state = secrets.token_urlsafe(32)
+    # 43-128 chars from the PKCE unreserved set. token_urlsafe(32) is 43.
+    verifier = secrets.token_urlsafe(32)
     params = urlencode(
         {
             "response_type": "code",
             "client_id": settings.TRAKT_CLIENT_ID,
             "redirect_uri": redirect_uri,
             "state": state,
+            "code_challenge": _pkce_challenge(verifier),
+            "code_challenge_method": "S256",
         }
     )
     response = RedirectResponse(f"{TRAKT_AUTH_URL}?{params}")
     _set_state_cookie(response, "trakt", state)
+    _set_state_cookie(response, "verifier_trakt", verifier)
     return response
 
 
 @router.get("/auth/trakt/callback", response_class=HTMLResponse)
 async def trakt_callback(request: Request, code: str, state: str | None = None):
     """Handle Trakt OAuth callback, exchange code for tokens."""
-    if not settings.TRAKT_CLIENT_ID or not settings.TRAKT_CLIENT_SECRET:
+    if not settings.TRAKT_CLIENT_ID:
         raise HTTPException(status_code=501, detail="Trakt integration is not configured on this server.")
 
     _verify_state(request, "trakt", state)
+    verifier = request.cookies.get(f"{_OAUTH_STATE_COOKIE_PREFIX}verifier_trakt")
+    if not verifier:
+        raise HTTPException(status_code=400, detail="Missing PKCE verifier. Please try connecting again.")
 
     redirect_uri = f"{settings.HOST_NAME}/auth/trakt/callback"
 
     try:
-        token_data = await trakt_service.exchange_code(code, redirect_uri)
+        token_data = await trakt_service.exchange_code(code, redirect_uri, verifier)
         access_token = token_data.get("access_token", "")
         refresh_token = token_data.get("refresh_token", "")
         # Trakt returns expires_in (seconds, ~3 months) and created_at (epoch).
