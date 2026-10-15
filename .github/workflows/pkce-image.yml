@@ -23,9 +23,9 @@ jobs:
           tags: ghcr.io/nsollazzo/watchly:trakt-pkce
           provenance: false
 
-      - name: Make the package public
+      - name: Link the package to this repo and make it public
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh api -X PUT /user/packages/container/watchly/visibility -f visibility=public || \
-          gh api -X PUT /users/nsollazzo/packages/container/watchly/visibility -f visibility=public
+          gh api -X POST /user/packages/container/watchly/restore -F repo=nsollazzo/Watchly || true
+          gh api -X PUT /user/packages/container/watchly/visibility -f visibility=public
